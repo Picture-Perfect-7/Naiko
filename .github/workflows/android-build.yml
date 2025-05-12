@@ -23,14 +23,20 @@ jobs:
     - name: Make gradlew executable
       run: chmod +x ./gradlew
 
-    - name: Build APK
-      run: ./gradlew assembleDebug
+    - name: Build release APK
+      run: ./gradlew assembleRelease
 
-    - name: Upload release to GitHub
+    - name: Create release tag with timestamp
+      id: tag
+      run: echo "TAG=alpha-test-$(date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub release
       uses: softprops/action-gh-release@v1
       with:
         name: Alpha Test 1
-        tag_name: alpha-test-1
-        files: app/build/outputs/apk/debug/app-debug.apk
+        tag_name: ${{ steps.tag.outputs.TAG }}
+        files: |
+          app/build/outputs/apk/release/app-release.apk
+          app/build/outputs/mapping/release/mapping.txt
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
