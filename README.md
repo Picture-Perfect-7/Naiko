@@ -1,4 +1,4 @@
-# NAIKO
+NAIKO
 
 (any1 help me create a logo)
 
