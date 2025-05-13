@@ -1,4 +1,4 @@
-name: "Alpha release test 8"
+name: "Alpha Test release 9"
 
 permissions: write-all
 
@@ -25,29 +25,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           api-level: ${{ env.ANDROID_API }}
           build-tools: ${{ env.BUILD_TOOLS }}
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x ./gradlew
+      - run: chmod +x ./gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew clean assembleDebug
+      - run: ./gradlew clean assembleDebug
 
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3
         with:
           name: naiko-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
@@ -58,35 +52,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3
         with:
           api-level: ${{ env.ANDROID_API }}
           build-tools: ${{ env.BUILD_TOOLS }}
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x ./gradlew
+      - run: chmod +x ./gradlew
 
       - name: Extract version from tag
         id: extract_version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Build Release splits
-        run: ./gradlew clean assembleStandardRelease
+      - run: ./gradlew clean assembleStandardRelease
 
-      - name: Package source code
-        run: |
+      - run: |
           git archive --format=zip HEAD -o source.zip
           git archive --format=tar.gz HEAD -o source.tar.gz
 
@@ -94,7 +82,7 @@ jobs:
         id: prep
         run: |
           RELEASE=${{ steps.extract_version.outputs.version }}
-          mkdir -p artifacts
+          mkdir artifacts
           declare -A SPLITS=(
             [7v]="app-standard-armeabi-v7a-release-unsigned.apk"
             [8v]="app-standard-arm64-v8a-release-unsigned.apk"
@@ -104,10 +92,7 @@ jobs:
           )
           for TYPE in "${!SPLITS[@]}"; do
             SRC="app/build/outputs/apk/standard/release/${SPLITS[$TYPE]}"
-            if [[ -f "$SRC" ]]; then
-              DST="artifacts/Naiko ${RELEASE} ${TYPE}.apk"
-              cp "$SRC" "$DST"
-            fi
+            [[ -f "$SRC" ]] && cp "$SRC" "artifacts/Naiko ${RELEASE} ${TYPE}.apk"
           done
           cp source.zip    "artifacts/Naiko ${RELEASE} source.zip"
           cp source.tar.gz "artifacts/Naiko ${RELEASE} source.tar.gz"
@@ -115,13 +100,12 @@ jobs:
             echo "| File | SHA-256 |"
             echo "|------|---------|"
             for F in artifacts/*; do
-              H=$(sha256sum "$F" | awk '{print $1}')
+              H=$(sha256sum "$F"|cut -d' ' -f1)
               echo "| $(basename "$F") | \`$H\` |"
             done
           } > artifacts/checksums.md
 
-      - name: Draft GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "Naiko ${{ steps.extract_version.outputs.version }}"
