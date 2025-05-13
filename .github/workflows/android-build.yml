@@ -1,7 +1,6 @@
-name: "Alpha release test 7"
+name: "Alpha release test 8"
 
-permissions:
-  contents: write
+permissions: write-all
 
 on:
   push:
@@ -11,7 +10,7 @@ on:
       - 'v*'
 
 concurrency:
-  group: ${{ github.workflow }}–${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -20,11 +19,11 @@ env:
   BUILD_TOOLS: '34.0.0'
 
 jobs:
-  # Always publish a Debug APK on pushes to main
   debug-build:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
     name: Build Debug APK
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,17 +49,16 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v3
         with:
-          name: Naiko-debug-${{ github.sha }}
+          name: naiko-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/app-debug.apk
 
-  # On tag pushes to main, build release splits, package, checksum, and draft a GitHub Release
   release:
     if: startsWith(github.ref, 'refs/tags/v')
+    name: Release Naiko ${{ steps.extract_version.outputs.version }}
     runs-on: ubuntu-latest
-    name: Release Naiko ${{ github.ref_name#refs/tags/ }}
 
     steps:
-      - name: Checkout code (full history)
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -80,7 +78,11 @@ jobs:
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      - name: Build all standard-Release splits
+      - name: Extract version from tag
+        id: extract_version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build Release splits
         run: ./gradlew clean assembleStandardRelease
 
       - name: Package source code
@@ -91,12 +93,8 @@ jobs:
       - name: Prepare artifacts & checksums
         id: prep
         run: |
-          # strip 'v' prefix
-          RELEASE=${GITHUB_REF#refs/tags/v}
-          echo "RELEASE=$RELEASE" >> $GITHUB_ENV
-
+          RELEASE=${{ steps.extract_version.outputs.version }}
           mkdir -p artifacts
-
           declare -A SPLITS=(
             [7v]="app-standard-armeabi-v7a-release-unsigned.apk"
             [8v]="app-standard-arm64-v8a-release-unsigned.apk"
@@ -104,8 +102,6 @@ jobs:
             [x64]="app-standard-x86_64-release-unsigned.apk"
             [universal]="app-standard-universal-release-unsigned.apk"
           )
-
-          # Copy & rename APK splits with spaces
           for TYPE in "${!SPLITS[@]}"; do
             SRC="app/build/outputs/apk/standard/release/${SPLITS[$TYPE]}"
             if [[ -f "$SRC" ]]; then
@@ -113,15 +109,11 @@ jobs:
               cp "$SRC" "$DST"
             fi
           done
-
-          # Copy source archives
           cp source.zip    "artifacts/Naiko ${RELEASE} source.zip"
           cp source.tar.gz "artifacts/Naiko ${RELEASE} source.tar.gz"
-
-          # Generate checksums table
           {
-            echo '| File | SHA-256 |'
-            echo '|------|---------|'
+            echo "| File | SHA-256 |"
+            echo "|------|---------|"
             for F in artifacts/*; do
               H=$(sha256sum "$F" | awk '{print $1}')
               echo "| $(basename "$F") | \`$H\` |"
@@ -131,8 +123,8 @@ jobs:
       - name: Draft GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name#refs/tags/ }}
-          name: "Naiko ${{ github.ref_name#refs/tags/ }}"
+          tag_name: ${{ github.ref_name }}
+          name: "Naiko ${{ steps.extract_version.outputs.version }}"
           body_path: artifacts/checksums.md
           draft: true
           files: artifacts/*
