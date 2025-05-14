@@ -1,4 +1,4 @@
-// Top‐level build.gradle.kts
+// Top-level build.gradle.kts
 
 buildscript {
     repositories {
@@ -9,8 +9,8 @@ buildscript {
     dependencies {
         // Android Gradle Plugin
         classpath("com.android.tools.build:gradle:8.1.0")
-        // Shortcut Gradle plugin (example coordinate—update to your version)
-        classpath("com.github.Android-Shortcut:shortcut-gradle-plugin:1.1.0")
+        // Shortcut Gradle plugin
+        classpath("com.github.Android-Shortcut:shortcut-gradle-plugin:1.1.0") // Replace with actual version
     }
 }
 
