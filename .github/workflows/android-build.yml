@@ -1,116 +1,123 @@
-name: "Alpha Test release 9"
+name: Android Production Build
 
-permissions: write-all
+permissions:
+  contents: write
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
+      - 'pre-*'
+      - 'dev-*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  JAVA_VERSION: '17'
-  ANDROID_API: '34'
-  BUILD_TOOLS: '34.0.0'
+  JAVA_VERSION: "17"
+  ANDROID_API: "34"
+  BUILD_TOOLS: "34.0.0"
 
 jobs:
-  debug-build:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    name: Build Debug APK
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-
-      - uses: android-actions/setup-android@v3
-        with:
-          api-level: ${{ env.ANDROID_API }}
-          build-tools: ${{ env.BUILD_TOOLS }}
-
-      - run: chmod +x ./gradlew
-
-      - run: ./gradlew clean assembleDebug
-
-      - uses: actions/upload-artifact@v3
-        with:
-          name: naiko-debug-${{ github.sha }}
-          path: app/build/outputs/apk/debug/app-debug.apk
-
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    name: Release Naiko ${{ steps.extract_version.outputs.version }}
+    name: Build & Release APKs
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
+      - name: Detect release channel
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$TAG" == pre-* ]]; then
+            echo "RELEASE_CHANNEL=pre" >> "$GITHUB_ENV"
+            echo "VERSION=${TAG#pre-}" >> "$GITHUB_ENV"
+          elif [[ "$TAG" == dev-* ]]; then
+            echo "RELEASE_CHANNEL=dev" >> "$GITHUB_ENV"
+            echo "VERSION=${TAG#dev-}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_CHANNEL=stable" >> "$GITHUB_ENV"
+            echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - uses: android-actions/setup-android@v3
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
         with:
           api-level: ${{ env.ANDROID_API }}
           build-tools: ${{ env.BUILD_TOOLS }}
 
-      - run: chmod +x ./gradlew
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
 
-      - name: Extract version from tag
-        id: extract_version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      - name: Run spotless & tests
+        run: ./gradlew spotlessCheck testReleaseUnitTest testStandardReleaseUnitTest
 
-      - run: ./gradlew clean assembleStandardRelease
+      - name: Build release APKs
+        run: ./gradlew clean assembleStandardRelease
 
-      - run: |
+      - name: Sign APKs
+        uses: r0adkll/sign-android-release@v1
+        with:
+          releaseDirectory: app/build/outputs/apk/standard/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Upload mapping.txt
+        uses: actions/upload-artifact@v3
+        with:
+          name: mapping-${{ env.VERSION }}
+          path: app/build/outputs/mapping/standardRelease/mapping.txt
+
+      - name: Package source code
+        run: |
           git archive --format=zip HEAD -o source.zip
           git archive --format=tar.gz HEAD -o source.tar.gz
 
-      - name: Prepare artifacts & checksums
-        id: prep
+      - name: Prepare release artifacts
         run: |
-          RELEASE=${{ steps.extract_version.outputs.version }}
-          mkdir artifacts
-          declare -A SPLITS=(
-            [7v]="app-standard-armeabi-v7a-release-unsigned.apk"
-            [8v]="app-standard-arm64-v8a-release-unsigned.apk"
-            [x86]="app-standard-x86-release-unsigned.apk"
-            [x64]="app-standard-x86_64-release-unsigned.apk"
-            [universal]="app-standard-universal-release-unsigned.apk"
+          mkdir -p artifacts
+          declare -A APKS=(
+            [7v]="app-standard-armeabi-v7a-release-unsigned-signed.apk"
+            [8v]="app-standard-arm64-v8a-release-unsigned-signed.apk"
+            [x86]="app-standard-x86-release-unsigned-signed.apk"
+            [x64]="app-standard-x86_64-release-unsigned-signed.apk"
+            [universal]="app-standard-universal-release-unsigned-signed.apk"
           )
-          for TYPE in "${!SPLITS[@]}"; do
-            SRC="app/build/outputs/apk/standard/release/${SPLITS[$TYPE]}"
-            [[ -f "$SRC" ]] && cp "$SRC" "artifacts/Naiko ${RELEASE} ${TYPE}.apk"
+          for arch in "${!APKS[@]}"; do
+            src="app/build/outputs/apk/standard/release/${APKS[$arch]}"
+            cp "$src" "artifacts/Naiko ${VERSION} ${arch}.apk"
           done
-          cp source.zip    "artifacts/Naiko ${RELEASE} source.zip"
-          cp source.tar.gz "artifacts/Naiko ${RELEASE} source.tar.gz"
+          cp source.zip    "artifacts/Naiko ${VERSION} source.zip"
+          cp source.tar.gz "artifacts/Naiko ${VERSION} source.tar.gz"
           {
             echo "| File | SHA-256 |"
             echo "|------|---------|"
-            for F in artifacts/*; do
-              H=$(sha256sum "$F"|cut -d' ' -f1)
-              echo "| $(basename "$F") | \`$H\` |"
+            for f in artifacts/*; do
+              h=$(sha256sum "$f" | cut -d ' ' -f1)
+              echo "| $(basename "$f") | \`$h\` |"
             done
           } > artifacts/checksums.md
 
-      - uses: softprops/action-gh-release@v2
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Naiko ${{ steps.extract_version.outputs.version }}"
+          name: "Naiko ${{ env.VERSION }} (${{ env.RELEASE_CHANNEL }})"
           body_path: artifacts/checksums.md
-          draft: true
+          draft: false
+          prerelease: ${{ env.RELEASE_CHANNEL != 'stable' }}
           files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
